@@ -1,14 +1,17 @@
 from Population import Population
 from Tasks import Gym, MNIST
-import Configs
+from Configs import Config, mnist_small as config
 import numpy as np
 
 
 task = Gym("CartPole-v0", num_runs=1)
-config = Configs.cartpole_small(task)
+task = MNIST(batch_size=100)
 
-task = MNIST(batch_size=32)
-config = Configs.mnist_small(task)
+config = Config(layer_sizes=config.LAYER_SIZES, layer_num_genes=config.LAYER_NUM_GENES,
+                population_size=config.POPULATION_SIZE, mutation_prob=config.MUTATION_PROB,
+                num_selected=config.NUM_SELECTED, num_generations=config.NUM_GENERATIONS)
+
+config(task)
 
 population = Population(config, task)
 
@@ -24,9 +27,16 @@ for generation in range(config.NUM_GENERATIONS):
     for i, layer in enumerate(c1.layers):
         print("Layer {}: {}/{}".format(i + 1, np.intersect1d(layer.random_seeds, c2.layers[i].random_seeds).shape[0],
                                        layer.random_seeds.shape[0]))
-    population.elite.generate()
-    print("Test Acc Of Fittest: ", task.run(population.elite, test=True))
-    population.elite.compress()
+    # print("Num Unique Genes In Fittest:")
+    # for i, layer in enumerate(c1.layers):
+    #     print("Layer {}: {}/{}".format(i + 1, np.unique(layer.random_seeds).shape[0], layer.random_seeds.shape[0]))
+    if generation % 5 == 0:
+        c1.generate()
+        print("Test Acc Of Fittest: ", task.run(c1, test=True, vectorize=False))
+        c1.compress()
+    # c2.generate()
+    # print("Test Acc Of Random: ", task.run(c2, test=True, vectorize=False))
+    # c2.compress()
     population.evolve()
 
 task.terminate()

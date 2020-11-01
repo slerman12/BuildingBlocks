@@ -30,26 +30,39 @@ class Layer:
 
         return self
 
-    def attend(self, query, l2_dist=False):
-        assert query.shape[0] == self.keys.shape[1]
+    def attend(self, query, l2_dist=False, batch_dim=False):
+        assert query.shape[1 if batch_dim else 0] == self.keys.shape[1]
         if l2_dist:
-            weights = np.sqrt(np.sum((self.keys - query) ** 2, axis=1))
+            if batch_dim:
+                weights = np.sqrt(np.sum((self.keys[None, :, :] - query[:, None, :]) ** 2, axis=2))
+            else:
+                weights = np.sqrt(np.sum((self.keys - query) ** 2, axis=1))
         else:
             weights = query.dot(self.keys.T)
 
         def softmax(x, temp=1.0):
             x /= temp
-            e_x = np.exp(x - np.max(x))
-            return e_x / e_x.sum()
+            if batch_dim:
+                e_x = np.exp(x - np.max(x, axis=1)[:, None])
+                return e_x / e_x.sum(axis=1)[:, None]
+            else:
+                e_x = np.exp(x - np.max())
+                return e_x / e_x.sum()
 
-        # attention_vector = np.sum(softmax(weights, 0.001)[:, np.newaxis] * self.values, axis=0)
-        attention_vector = self.values[np.argmax(weights)]
-        return attention_vector / np.linalg.norm(attention_vector)
+        if batch_dim:
+            # attention_vector = np.sum(softmax(weights, 0.001)[:, :, None] * self.values[None, :, :], axis=1)
+            attention_vector = self.values[np.argmax(weights, axis=1)]
+            return attention_vector / np.linalg.norm(attention_vector, axis=1)[:, None]
+        else:
+            # attention_vector = np.sum(softmax(weights, 0.001)[:, np.newaxis] * self.values, axis=0)
+            attention_vector = self.values[np.argmax(weights)]
+            return attention_vector / np.linalg.norm(attention_vector)
 
     def crossover(self, chromosome_2):
         np.random.seed()
         rand = np.random.uniform(size=self.random_seeds.shape)
-        # Try weighted average as a kind of safe crossover-mutation
+        # TODO Try weighted average as a kind of safe crossover-mutation
+        # TODO Should the random seeds be shuffled first?
         crossover_layer = np.rint(rand).astype(int) * self.random_seeds + np.rint(1 - rand).astype(int) * chromosome_2.random_seeds
         return Layer(self.config, crossover_layer)
 
@@ -94,12 +107,12 @@ class Chromosome:
 
         return self
 
-    def forward(self, inputs):
+    def forward(self, inputs, batch_dim=False):
         assert (0 <= inputs).all() and (inputs <= 1).all()
         assert self.is_generated
-        o_i = self.layers[0].attend(inputs, l2_dist=True)
+        o_i = self.layers[0].attend(inputs, l2_dist=True, batch_dim=batch_dim)
         for layer in self.layers[1:]:
-            o_i = layer.attend(o_i)
+            o_i = layer.attend(o_i, batch_dim=batch_dim)
         return o_i
 
     def crossover(self, chromosome_2):
@@ -118,10 +131,10 @@ class Chromosome:
         self.is_generated = False
 
     def __str__(self):
-        c_str = ""
+        chromosome_str = ""
         for layer in self.layers:
-            c_str += str(layer) + "\n"
-        return c_str
+            chromosome_str += str(layer) + "\n"
+        return chromosome_str
 
 
 class Population:
@@ -131,9 +144,7 @@ class Population:
         self.population = [Chromosome(config) for _ in range(config.POPULATION_SIZE)]
         for chromosome in self.population:
             self.fitness(chromosome)
-        self.selection = self.select()
-        self.elite = self.population[0]
-        self.elite_fitness = self.elite.fitness
+        self.select()
 
     def fitness(self, chromosome):
         chromosome.generate()
@@ -146,12 +157,12 @@ class Population:
         self.population.sort(reverse=True, key=lambda x: x.fitness)
         self.elite = self.population[0]
         self.elite_fitness = self.elite.fitness
-        return self.population[:self.config.NUM_SELECTED]
+        self.selection = self.population[:self.config.NUM_SELECTED]
 
     def evolve(self):
         next_generation = []
 
-        # Can multi-thread this for-loop (but how to create multiple instances of same task?)
+        # Can multi-thread this for-loop
         for i in range(self.config.POPULATION_SIZE):
             mother, father = random.sample(self.selection, 2)
             child = mother.crossover(father).mutate()
@@ -160,6 +171,6 @@ class Population:
 
         self.population = next_generation
 
-        # TODO save elite(s)
-        self.selection = self.select()
+        # TODO Save elite(s)
+        self.select()
         self.task.evolve()
