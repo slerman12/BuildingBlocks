@@ -3,9 +3,10 @@ import numpy as np
 
 
 class Layer:
-    def __init__(self, config, random_seeds):
+    def __init__(self, config, random_seeds, running_fitness=None):
         self.config = config
         self.random_seeds = random_seeds
+        self.running_fitness = running_fitness
         self.key_size = None
         self.value_size = None
         self.keys = None
@@ -58,20 +59,27 @@ class Layer:
             attention_vector = self.values[np.argmax(weights)]
             return attention_vector / np.linalg.norm(attention_vector)
 
-    def crossover(self, chromosome_2):
+    def crossover(self, layer_2):
         np.random.seed()
         rand = np.random.uniform(size=self.random_seeds.shape)
         # TODO Try weighted average as a kind of safe crossover-mutation
         # TODO Should the random seeds be shuffled first?
-        crossover_layer = np.rint(rand).astype(int) * self.random_seeds + np.rint(1 - rand).astype(int) * chromosome_2.random_seeds
-        return Layer(self.config, crossover_layer)
+        crossover_genes = np.rint(rand).astype(int) * self.random_seeds + np.rint(1 - rand).astype(int) * layer_2.random_seeds
+        if self.config.BETA != 0:
+            crossover_fitness = np.rint(rand).astype(int) * self.running_fitness + np.rint(1 - rand).astype(int) * layer_2.running_fitness
+        else:
+            crossover_fitness = None
+        return Layer(self.config, crossover_genes, crossover_fitness)
 
     def mutate(self):
         np.random.seed()
-        mutated_layer = Layer(self.config, self.random_seeds.copy())
+        mutated_layer = Layer(self.config, self.random_seeds.copy(),
+                              self.running_fitness.copy() if self.config.BETA != 0 else None)
         mutation_probs = np.random.random(size=self.random_seeds.shape)
         to_mutate = mutation_probs < self.config.MUTATION_PROB
         mutated_layer.random_seeds[to_mutate] = np.random.randint(2**32 - 1, size=np.count_nonzero(to_mutate))
+        if self.config.BETA != 0:
+            mutated_layer.running_fitness[to_mutate] = -1
         return mutated_layer
 
     def compress(self):
@@ -80,6 +88,17 @@ class Layer:
         self.keys = None
         self.values = None
         self.is_generated = False
+
+    def update_running_fitness(self, fitness):
+        if self.config.BETA != 0:
+            if self.running_fitness is None:
+                self.running_fitness = np.full(self.random_seeds.shape, fitness)
+            else:
+                mutated_genes = self.running_fitness < 0
+                self.running_fitness[mutated_genes] = fitness
+                self.running_fitness = self.config.BETA * self.running_fitness + (1 - self.config.BETA) * fitness
+        else:
+            self.running_fitness = fitness
 
     def __str__(self):
         return str(self.random_seeds)
@@ -130,6 +149,16 @@ class Chromosome:
 
         self.is_generated = False
 
+    def update_fitness(self, fitness):
+        if self.config.BETA == 0:
+            self.fitness = fitness
+        else:
+            fitnesses = 0
+            for layer in self.layers:
+                layer.update_running_fitness(fitness)
+                fitnesses += np.sum(layer.running_fitness)
+            self.fitness = fitnesses / np.sum(self.config.LAYER_NUM_GENES)
+
     def __str__(self):
         chromosome_str = ""
         for layer in self.layers:
@@ -147,10 +176,11 @@ class Population:
         self.select()
 
     def fitness(self, chromosome):
+        self.task.update()
         chromosome.generate()
         fitness = self.task.run(chromosome)
         chromosome.compress()
-        chromosome.fitness = fitness
+        chromosome.update_fitness(fitness)
         return fitness
 
     def select(self):
@@ -173,4 +203,4 @@ class Population:
 
         # TODO Save elite(s)
         self.select()
-        self.task.evolve()
+        # self.task.update()

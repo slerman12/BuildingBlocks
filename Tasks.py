@@ -49,7 +49,7 @@ class Gym:
                     break
         return total_reward / self.num_runs
 
-    def evolve(self):
+    def update(self):
         pass
 
     def terminate(self):
@@ -60,17 +60,20 @@ class MNIST:
     def __init__(self, batch_size=32):
         self.batch_size = batch_size
 
+        self.epoch = 0
+
         transform = transforms.Compose([
             transforms.ToTensor(),
             # transforms.Normalize((0.1307,), (0.3081,))
         ])
         dataset1 = datasets.MNIST('../data', train=True, download=True, transform=transform)
-        dataset2 = datasets.MNIST('../data', train=False, transform=transform)
+        dataset2 = datasets.MNIST('../data', train=False, download=True, transform=transform)
 
         self.train_loader = torch.utils.data.DataLoader(dataset1, batch_size=batch_size)
+        self.train_iterator = iter(self.train_loader)
         self.test_loader = torch.utils.data.DataLoader(dataset2, batch_size=len(dataset2))
 
-        self.evolve()
+        self.update()
         self.x_test, self.y_test = next(iter(self.test_loader))
         self.x_test = self.x_test.numpy()
         self.y_test = self.y_test.numpy()
@@ -86,6 +89,7 @@ class MNIST:
 
     def run(self, model, test=False, vectorize=True):
         if test:
+            # TODO why is test so much worse when batches are new/unseen each time? Are they?
             x = self.x_test
             y = self.y_test
         else:
@@ -113,8 +117,14 @@ class MNIST:
 
         return accuracy
 
-    def evolve(self):
-        self.x, self.y = next(iter(self.train_loader))
+    def update(self):
+        try:
+            self.x, self.y = next(self.train_iterator)
+        except StopIteration:
+            self.train_iterator = iter(self.train_loader)
+            self.x, self.y = next(self.train_iterator)
+            self.epoch += 1
+
         self.x = self.x.numpy()
         self.y = self.y.numpy()
 
