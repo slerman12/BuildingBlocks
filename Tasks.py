@@ -9,7 +9,7 @@ from torchvision import datasets, transforms
 
 
 class Gym:
-    def __init__(self, env_id='CartPole-v0', outdir='/tmp/atari-agent-results', num_runs=1):
+    def __init__(self, env_id='CartPole-v0', outdir='/tmp/atari-agent-results', num_runs=1, episode_len=np.inf):
         # logger.set_level(logger.INFO)
 
         self.env_id = env_id
@@ -18,9 +18,15 @@ class Gym:
         self.env.seed(0)
 
         self.num_runs = num_runs
+        self.episode_len = episode_len
 
-        self.inputs_dim = np.prod(self.env.observation_space.shape)
+        self.obs = self.env.reset()
+        self.obs = self.observation_map(self.obs)
+
+        self.inputs_dim = np.prod(self.obs.shape)
         self.outputs_dim = self.env.action_space.n
+
+        self.epoch = 0
 
     def observation_map(self, obs):
         if self.env_id == 'CartPole-v0':
@@ -37,16 +43,22 @@ class Gym:
 
     def run(self, agent, test=False, vectorize=True):
         total_reward = 0
+        obs = self.obs
         for _ in range(self.num_runs):
-            obs = self.env.reset()
-            while True:
-                obs = self.observation_map(obs)
+            steps = 0
+            while True and steps < self.episode_len:
                 forward = agent.forward(obs)
                 action = np.argmax(forward)
                 obs, reward, done, _ = self.env.step(action)
+                obs = self.observation_map(obs)
                 total_reward += reward
+                steps += 1
                 if done:
+                    obs = self.env.reset()
+                    obs = self.observation_map(obs)
+                    self.epoch += 1
                     break
+        self.obs = obs
         return total_reward / self.num_runs
 
     def update(self):

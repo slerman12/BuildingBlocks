@@ -176,7 +176,7 @@ class Population:
         self.select()
 
     def fitness(self, chromosome):
-        self.task.update()
+        # self.task.update()
         chromosome.generate()
         fitness = self.task.run(chromosome)
         chromosome.compress()
@@ -203,4 +203,4 @@ class Population:
 
         # TODO Save elite(s)
         self.select()
-        # self.task.update()
+        self.task.update()
